@@ -1,14 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text;
 using NUnit.Framework;
 
 namespace ShuntingYard
 {
+    enum OpType
+    {
+        Add,
+        Sub,
+        Mul,
+        Div,
+        LeftParens,
+        RightParens,
+        Plus,
+        Minus,
+        Coma
+    }
     interface INode
     {
     }
@@ -21,25 +31,12 @@ namespace ShuntingYard
     {
     }
 
-    enum BinOpType
-    {
-        Add,
-        Sub,
-        Mul,
-        Div,
-        LeftParens,
-        RightParens,
-        Plus,
-        Minus,
-        Coma
-    }
-
     struct UnOp : IOp
     {
-        public BinOpType Type;
-        public INode A;
+        public readonly OpType Type;
+        public readonly INode A;
 
-        public UnOp(BinOpType type, INode a)
+        public UnOp(OpType type, INode a)
         {
             Type = type;
             A = a;
@@ -48,11 +45,11 @@ namespace ShuntingYard
 
     struct BinOp : IOp
     {
-        public BinOpType Type;
+        public OpType Type;
         public INode A;
         public INode B;
 
-        public BinOp(BinOpType type, INode a, INode b)
+        public BinOp(OpType type, INode a, INode b)
         {
             Type = type;
             A = a;
@@ -62,8 +59,8 @@ namespace ShuntingYard
 
     struct FuncCall : IOp
     {
-        public string Id;
-        public List<INode> Arguments;
+        public readonly string Id;
+        public readonly List<INode> Arguments;
 
         public FuncCall(string id, List<INode> arguments)
         {
@@ -74,7 +71,7 @@ namespace ShuntingYard
 
     struct Value : IVal
     {
-        public float F;
+        public readonly float F;
 
         public Value(float f)
         {
@@ -89,6 +86,59 @@ namespace ShuntingYard
         public Variable(string id)
         {
             Id = id;
+        }
+    }
+
+    static class Evaluator
+    {
+        public static float Eval(INode node, Dictionary<string, float> variables = null)
+        {
+            switch (node)
+            {
+                case Value v:
+                    return v.F;
+                case Variable variable:
+                    return variables[variable.Id];
+                case UnOp u:
+                    return u.Type == OpType.Plus ? Eval(u.A, variables) : -Eval(u.A, variables);
+                case BinOp bin:
+                    var a = Eval(bin.A, variables);
+                    var b = Eval(bin.B, variables);
+                    switch (bin.Type)
+                    {
+                        case OpType.Add:
+                            return a + b;
+                        case OpType.Sub:
+                            return a - b;
+                        case OpType.Mul:
+                            return a * b;
+                        case OpType.Div:
+                            return a / b;
+                        default:
+                            throw new ArgumentOutOfRangeException(bin.Type.ToString());
+                    }
+                    case FuncCall f:
+                        void CheckArgCount(int n) => Assert.AreEqual(f.Arguments.Count, n);
+                        switch (f.Id)
+                        {
+                            case "sin": return MathF.Sin(Eval(f.Arguments.Single(), variables));
+                            case "cos": return MathF.Sin(Eval(f.Arguments.Single(), variables));
+                            case "sqrt": return MathF.Sqrt(Eval(f.Arguments.Single(), variables));
+                            case "abs": return MathF.Abs(Eval(f.Arguments.Single(), variables));
+                            case "pow":
+                                CheckArgCount(2);
+                                return MathF.Pow(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                            case "min":
+                                CheckArgCount(2);
+                                return MathF.Min(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                            case "max":
+                                CheckArgCount(2);
+                                return MathF.Max(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                            default: throw new InvalidDataException($"Unknown function {f.Id}");
+                        }
+
+                default: throw new NotImplementedException();
+            }
         }
     }
 
@@ -127,13 +177,13 @@ namespace ShuntingYard
 
         struct OpDesc
         {
-            public readonly BinOpType Type;
+            public readonly OpType Type;
             public readonly string Str;
             public readonly int Precedence;
             public readonly Associativity Associativity;
             public bool Unary;
 
-            public OpDesc(BinOpType type, string str, int precedence, Associativity associativity = Associativity.None, bool unary = false)
+            public OpDesc(OpType type, string str, int precedence, Associativity associativity = Associativity.None, bool unary = false)
             {
                 Type = type;
                 Str = str;
@@ -149,22 +199,22 @@ namespace ShuntingYard
             Left,
             Right,
         }
-        static Dictionary<BinOpType, OpDesc> Ops = new Dictionary<BinOpType,OpDesc>
+        static Dictionary<OpType, OpDesc> Ops = new Dictionary<OpType,OpDesc>
         {
-            {BinOpType.Add, new OpDesc(BinOpType.Add, "+", 2, Associativity.Left)},
-            {BinOpType.Sub, new OpDesc(BinOpType.Sub, "-", 2, Associativity.Left)},
+            {OpType.Add, new OpDesc(OpType.Add, "+", 2, Associativity.Left)},
+            {OpType.Sub, new OpDesc(OpType.Sub, "-", 2, Associativity.Left)},
             
-            {BinOpType.Mul, new OpDesc(BinOpType.Mul, "*", 3, Associativity.Left)},
-            {BinOpType.Div, new OpDesc(BinOpType.Div, "/", 3, Associativity.Left)},
+            {OpType.Mul, new OpDesc(OpType.Mul, "*", 3, Associativity.Left)},
+            {OpType.Div, new OpDesc(OpType.Div, "/", 3, Associativity.Left)},
             
-            {BinOpType.Plus, new OpDesc(BinOpType.Plus, "+", 2000, Associativity.Right, unary: true)},
-            {BinOpType.Minus, new OpDesc(BinOpType.Minus, "-", 2000, Associativity.Right, unary: true)},
+            {OpType.Plus, new OpDesc(OpType.Plus, "+", 2000, Associativity.Right, unary: true)},
+            {OpType.Minus, new OpDesc(OpType.Minus, "-", 2000, Associativity.Right, unary: true)},
             
-            {BinOpType.LeftParens, new OpDesc(BinOpType.LeftParens, "(", 5)},
-            {BinOpType.Coma, new OpDesc(BinOpType.Coma, ",", 1000)},
+            {OpType.LeftParens, new OpDesc(OpType.LeftParens, "(", 5)},
+            {OpType.Coma, new OpDesc(OpType.Coma, ",", 1000)},
         };
 
-        private static string FormatOp(BinOpType bType)
+        private static string FormatOp(OpType bType)
         {
             return Ops[bType].Str;
         }
@@ -247,11 +297,10 @@ namespace ShuntingYard
                 {
                     foreach (var pair in Ops)
                     {
-                        if (_input.IndexOf(pair.Value.Str, _i) == _i)
-                        {
-                            desc = pair.Value;
-                            return true;
-                        }
+                        if (_input.IndexOf(pair.Value.Str, _i, StringComparison.Ordinal) != _i)
+                            continue;
+                        desc = pair.Value;
+                        return true;
                     }
 
                     desc = default;
@@ -300,18 +349,18 @@ namespace ShuntingYard
                 switch (r.CurrentTokenType)
                 {
                     case Token.LeftParens:
-                        opStack.Push(Ops[BinOpType.LeftParens]);
+                        opStack.Push(Ops[OpType.LeftParens]);
                         r.ReadToken();
                         break;
                     case Token.RightParens:
                     {
-                        while (opStack.TryPeek(out var stackOp) && stackOp.Type != BinOpType.LeftParens)
+                        while (opStack.TryPeek(out var stackOp) && stackOp.Type != OpType.LeftParens)
                         {
                             opStack.Pop();
                             PopOpOpandsAndPushNode(stackOp);
                         }
 
-                        if (opStack.TryPeek(out var leftParens) && leftParens.Type == BinOpType.LeftParens)
+                        if (opStack.TryPeek(out var leftParens) && leftParens.Type == OpType.LeftParens)
                             opStack.Pop();
                         r.ReadToken();
                         break;
@@ -332,7 +381,7 @@ namespace ShuntingYard
                                    stackOp.Precedence > readBinOp.Precedence ||
                                    stackOp.Precedence == readBinOp.Precedence &&
                                    readBinOp.Associativity == Associativity.Left) &&
-                               stackOp.Type != BinOpType.LeftParens && stackOp.Type != BinOpType.Coma)
+                               stackOp.Type != OpType.LeftParens && stackOp.Type != OpType.Coma)
                         {
                             opStack.Pop();
                             PopOpOpandsAndPushNode(stackOp);
@@ -366,7 +415,7 @@ namespace ShuntingYard
                             {
                                 switch (n)
                                 {
-                                    case BinOp b when b.Type == BinOpType.Coma:
+                                    case BinOp b when b.Type == OpType.Coma:
                                         RecurseThroughArguments(b.A);
                                         RecurseThroughArguments(b.B);
                                         break;
@@ -390,81 +439,12 @@ namespace ShuntingYard
             while (opStack.Count > startOpStackSize)
             {
                 var readBinOp = opStack.Pop();
-                if (readBinOp.Type == BinOpType.LeftParens || readBinOp.Type == BinOpType.RightParens)
+                if (readBinOp.Type == OpType.LeftParens || readBinOp.Type == OpType.RightParens)
                     throw new InvalidDataException("Mismatched parens");
                 PopOpOpandsAndPushNode(readBinOp);
             }
 
             return output.Pop();
-        }
-    }
-
-
-    class Program
-    {
-        [Test]
-        public void Test()
-        {
-            Console.WriteLine(Parser.Format(new BinOp(BinOpType.Add,
-                new BinOp(BinOpType.Mul, new Value(1), new Value(2)), new Value(3))));
-        }
-
-        [TestCase("3+4", "(3 + 4)")]
-        [TestCase("12*34", "(12 * 34)")]
-        [TestCase("12*34+45", "((12 * 34) + 45)")]
-        [TestCase("12+34*45", "(12 + (34 * 45))")]
-        [TestCase("12+34+45", "((12 + 34) + 45)", Description = "Left associativity")]
-        [TestCase("(32+4)", "(32 + 4)")]
-        [TestCase("a", "$a")]
-        [TestCase("1 * a+3", "((1 * $a) + 3)")]
-        // unary
-        [TestCase("-1", "-1")]
-        [TestCase("--1", "--1")]
-        [TestCase("-3+4", "(-3 + 4)")]
-        [TestCase("3+-4", "(3 + -4)")]
-        [TestCase("-(3+4)", "-(3 + 4)")]
-        // coma
-        [TestCase("1,2", "(1 , 2)")]
-        [TestCase("1,2,3", "(1 , (2 , 3))")]
-        // func calls
-        [TestCase("sin(42)", "sin(42)")]
-        [TestCase("sin(42, 43)", "sin(42, 43)")]
-        [TestCase("sin(-42)", "sin(-42)")]
-        [TestCase("sin(1+2)", "sin((1 + 2))")]
-        [TestCase("sin(cos(43))", "sin(cos(43))")]
-        [TestCase("sin(1, cos(43))", "sin(1, cos(43))")]
-        [TestCase("sin(-42, cos(-43))", "sin(-42, cos(-43))")]
-        public void Parse(string input, string expectedFormat)
-        {
-            INode parsed = Parser.Parse(input);
-            var format = Parser.Format(parsed);
-            Console.WriteLine(format);
-            Assert.AreEqual(expectedFormat, format);
-        }
-        [TestCase("32+4", "32 + 4")]
-        [TestCase("32+ 4", "32 + 4")]
-        [TestCase("32+ 4*1", "32 + 4 * 1")]
-        [TestCase("32+ 4*a+2", "32 + 4 * a + 2")]
-        [TestCase("1*a", "1 * a")]
-        [TestCase("(32+4)", "( 32 + 4 )")]
-        [TestCase("(32+4)*1", "( 32 + 4 ) * 1")]
-        [TestCase("1,2", "1 , 2")]
-        public void Tokenizer_Works(string input, string spaceSeparatedTokens)
-        {
-            var reader = new Parser.Reader(input);
-            string result = null;
-            while (!reader.Done)
-            {
-                reader.ReadToken();
-                var readerCurrentToken = reader.CurrentTokenType == Token.LeftParens ? "(" : reader.CurrentTokenType == Token.RightParens ? ")" : reader.CurrentToken;
-                if (result == null)
-                    result = readerCurrentToken;
-                else
-                    result += " " + readerCurrentToken;
-            }
-
-            Console.WriteLine(result);
-            Assert.AreEqual(spaceSeparatedTokens, result);
         }
     }
 }
