@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -19,6 +20,7 @@ namespace ShuntingYard
         Minus,
         Coma
     }
+
     interface INode
     {
     }
@@ -45,9 +47,9 @@ namespace ShuntingYard
 
     struct BinOp : IOp
     {
-        public OpType Type;
-        public INode A;
-        public INode B;
+        public readonly OpType Type;
+        public readonly INode A;
+        public readonly INode B;
 
         public BinOp(OpType type, INode a, INode b)
         {
@@ -81,12 +83,22 @@ namespace ShuntingYard
 
     struct Variable : IVal
     {
-        public string Id;
+        public readonly string Id;
 
         public Variable(string id)
         {
             Id = id;
         }
+    }
+
+    public enum Token
+    {
+        None,
+        Op,
+        Number,
+        Identifier,
+        LeftParens,
+        RightParens,
     }
 
     static class Evaluator
@@ -117,73 +129,71 @@ namespace ShuntingYard
                         default:
                             throw new ArgumentOutOfRangeException(bin.Type.ToString());
                     }
-                    case FuncCall f:
-                        void CheckArgCount(int n) => Assert.AreEqual(f.Arguments.Count, n);
-                        switch (f.Id)
-                        {
-                            case "sin": return MathF.Sin(Eval(f.Arguments.Single(), variables));
-                            case "cos": return MathF.Sin(Eval(f.Arguments.Single(), variables));
-                            case "sqrt": return MathF.Sqrt(Eval(f.Arguments.Single(), variables));
-                            case "abs": return MathF.Abs(Eval(f.Arguments.Single(), variables));
-                            case "pow":
-                                CheckArgCount(2);
-                                return MathF.Pow(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
-                            case "min":
-                                CheckArgCount(2);
-                                return MathF.Min(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
-                            case "max":
-                                CheckArgCount(2);
-                                return MathF.Max(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
-                            default: throw new InvalidDataException($"Unknown function {f.Id}");
-                        }
+                case FuncCall f:
+                    void CheckArgCount(int n) => Assert.AreEqual(f.Arguments.Count, n);
+                    switch (f.Id)
+                    {
+                        case "sin": return MathF.Sin(Eval(f.Arguments.Single(), variables));
+                        case "cos": return MathF.Sin(Eval(f.Arguments.Single(), variables));
+                        case "sqrt": return MathF.Sqrt(Eval(f.Arguments.Single(), variables));
+                        case "abs": return MathF.Abs(Eval(f.Arguments.Single(), variables));
+                        case "pow":
+                            CheckArgCount(2);
+                            return MathF.Pow(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                        case "min":
+                            CheckArgCount(2);
+                            return MathF.Min(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                        case "max":
+                            CheckArgCount(2);
+                            return MathF.Max(Eval(f.Arguments[0], variables), Eval(f.Arguments[1], variables));
+                        default: throw new InvalidDataException($"Unknown function {f.Id}");
+                    }
 
                 default: throw new NotImplementedException();
             }
         }
     }
 
-    public enum Token
-    {
-        None,
-        Op,
-        Number,
-        Identifier,
-        LeftParens,
-        RightParens,
-    }
-
-
-    static class Parser
+    static class Formatter
     {
         public static string Format(INode n)
         {
             switch (n)
             {
                 case Value v:
-                    return v.F.ToString();
+                    return v.F.ToString(CultureInfo.InvariantCulture);
                 case Variable v:
-                    return "$" + v.Id.ToString();
+                    return "$" + v.Id;
                 case UnOp un:
                     return $"{FormatOp(un.Type)}{Format(un.A)}";
                 case BinOp b:
                     return $"({Format(b.A)} {FormatOp(b.Type)} {Format(b.B)})";
                 case FuncCall f:
-                    var args = string.Join(", ", f.Arguments.Select(Format));
+                    var args = String.Join(", ", f.Arguments.Select(Format));
                     return $"{f.Id}({args})";
                 default:
                     throw new NotImplementedException();
             }
         }
 
-        struct OpDesc
+        private static string FormatOp(OpType bType)
+        {
+            return Parser.Ops[bType].Str;
+        }
+    }
+
+    static class Parser
+    {
+        internal struct Operator
         {
             public readonly OpType Type;
             public readonly string Str;
             public readonly int Precedence;
             public readonly Associativity Associativity;
-            public bool Unary;
+            public readonly bool Unary;
 
-            public OpDesc(OpType type, string str, int precedence, Associativity associativity = Associativity.None, bool unary = false)
+            public Operator(OpType type, string str, int precedence, Associativity associativity = Associativity.None,
+                bool unary = false)
             {
                 Type = type;
                 Str = str;
@@ -193,123 +203,30 @@ namespace ShuntingYard
             }
         }
 
-        enum Associativity
+        internal enum Associativity
         {
             None,
             Left,
             Right,
         }
-        static Dictionary<OpType, OpDesc> Ops = new Dictionary<OpType,OpDesc>
+
+        internal static readonly Dictionary<OpType, Operator> Ops = new Dictionary<OpType, Operator>
         {
-            {OpType.Add, new OpDesc(OpType.Add, "+", 2, Associativity.Left)},
-            {OpType.Sub, new OpDesc(OpType.Sub, "-", 2, Associativity.Left)},
-            
-            {OpType.Mul, new OpDesc(OpType.Mul, "*", 3, Associativity.Left)},
-            {OpType.Div, new OpDesc(OpType.Div, "/", 3, Associativity.Left)},
-            
-            {OpType.Plus, new OpDesc(OpType.Plus, "+", 2000, Associativity.Right, unary: true)},
-            {OpType.Minus, new OpDesc(OpType.Minus, "-", 2000, Associativity.Right, unary: true)},
-            
-            {OpType.LeftParens, new OpDesc(OpType.LeftParens, "(", 5)},
-            {OpType.Coma, new OpDesc(OpType.Coma, ",", 1000)},
+            {OpType.Add, new Operator(OpType.Add, "+", 2, Associativity.Left)},
+            {OpType.Sub, new Operator(OpType.Sub, "-", 2, Associativity.Left)},
+
+            {OpType.Mul, new Operator(OpType.Mul, "*", 3, Associativity.Left)},
+            {OpType.Div, new Operator(OpType.Div, "/", 3, Associativity.Left)},
+
+            {OpType.LeftParens, new Operator(OpType.LeftParens, "(", 5)},
+
+            {OpType.Coma, new Operator(OpType.Coma, ",", 1000)},
+
+            {OpType.Plus, new Operator(OpType.Plus, "+", 2000, Associativity.Right, unary: true)},
+            {OpType.Minus, new Operator(OpType.Minus, "-", 2000, Associativity.Right, unary: true)},
         };
 
-        private static string FormatOp(OpType bType)
-        {
-            return Ops[bType].Str;
-        }
-
-        internal class Reader
-        {
-            private string _input;
-            private int _i;
-
-            public Reader(string input)
-            {
-                _input = input.Trim();
-                _i = 0;
-            }
-
-            private void SkipWhitespace()
-            {
-                while (!Done && char.IsWhiteSpace(_input[_i]))
-                    _i++;
-            }
-
-            public bool Done => _i >= _input.Length;
-            private char NextChar => _input[_i];
-            private char ConsumeChar() => _input[_i++];
-
-            public string CurrentToken;
-            public Token CurrentTokenType;
-            public Token PrevTokenType;
-
-            public void ReadToken()
-            {
-                CurrentToken = null;
-                PrevTokenType = CurrentTokenType;
-                CurrentTokenType = Token.None;
-                if(Done)
-                    return;
-                if (NextChar == '(')
-                {
-                    ConsumeChar();
-                    CurrentTokenType = Token.LeftParens;
-                }
-                else if (NextChar == ')')
-                {
-                    ConsumeChar();
-                    CurrentTokenType = Token.RightParens;
-                }
-                else if (char.IsDigit(NextChar))
-                {
-                    StringBuilder sb = new StringBuilder();
-                    do
-                    {
-                        sb.Append(ConsumeChar());
-                    } while (!Done && char.IsDigit(NextChar));
-
-                    CurrentToken = sb.ToString();
-                    CurrentTokenType = Token.Number;
-                }
-                else
-                {
-                    if (MatchOp(out var op))
-                    {
-                        CurrentToken = op.Str;
-                        CurrentTokenType = Token.Op;
-                        for (int i = 0; i < CurrentToken.Length; i++)
-                            ConsumeChar();
-                    }
-                    else
-                    {
-                        CurrentTokenType = Token.Identifier;
-                        StringBuilder sb = new StringBuilder();
-                        while (!Done && !char.IsDigit(NextChar) && !MatchOp(out _))
-                            sb.Append(ConsumeChar());
-                        CurrentToken = sb.ToString();
-                    }
-                }
-
-                SkipWhitespace();
-                
-                bool MatchOp(out OpDesc desc)
-                {
-                    foreach (var pair in Ops)
-                    {
-                        if (_input.IndexOf(pair.Value.Str, _i, StringComparison.Ordinal) != _i)
-                            continue;
-                        desc = pair.Value;
-                        return true;
-                    }
-
-                    desc = default;
-                    return false;
-                }
-            }
-        }
-
-        static OpDesc ReadBinOp(string input, bool unary)
+        static Operator ReadOperator(string input, bool unary)
         {
             return Ops.Single(o => o.Value.Str == input && o.Value.Unary == unary).Value;
         }
@@ -317,33 +234,17 @@ namespace ShuntingYard
         public static INode Parse(string s)
         {
             var output = new Stack<INode>();
-            var opStack = new Stack<OpDesc>();
-            
+            var opStack = new Stack<Operator>();
+
             Reader r = new Reader(s);
             r.ReadToken();
-            var readUntilToken = Token.None;
-            int startOpStackSize = 0;
-            
-            return ParseUntil(r, opStack, output, readUntilToken, startOpStackSize);
+
+            return ParseUntil(r, opStack, output, Token.None, 0);
         }
 
-        private static INode ParseUntil(Reader r, Stack<OpDesc> opStack, Stack<INode> output, Token readUntilToken, int startOpStackSize)
+        private static INode ParseUntil(Reader r, Stack<Operator> opStack, Stack<INode> output, Token readUntilToken,
+            int startOpStackSize)
         {
-            void PopOpOpandsAndPushNode(OpDesc readBinOp)
-            {
-                if (readBinOp.Unary)
-                {
-                    var a = output.Pop();
-                    output.Push(new UnOp(readBinOp.Type, a));
-                }
-                else
-                {
-                    var b = output.Pop();
-                    var a = output.Pop();
-                    output.Push(new BinOp(readBinOp.Type, a, b));
-                }
-            }
-
             do
             {
                 switch (r.CurrentTokenType)
@@ -367,21 +268,19 @@ namespace ShuntingYard
                     }
                     case Token.Op:
                     {
-                        bool unary = r.PrevTokenType == Token.Op || r.PrevTokenType == Token.LeftParens ||
+                        bool unary = r.PrevTokenType == Token.Op ||
+                                     r.PrevTokenType == Token.LeftParens ||
                                      r.PrevTokenType == Token.None;
+                        var readBinOp = ReadOperator(r.CurrentToken, unary);
 
-                        var readBinOp = ReadBinOp(r.CurrentToken, unary);
-
-                        /*while ((there is a function at the top of the operator stack)
-                        or (there is an operator at the top of the operator stack with greater precedence)
-                        or (the operator at the top of the operator stack has equal precedence and the token is left associative))
-                        and (the operator at the top of the operator stack is not a left parenthesis):*/
                         while (opStack.TryPeek(out var stackOp) &&
-                               ( /* function ||*/
-                                   stackOp.Precedence > readBinOp.Precedence ||
-                                   stackOp.Precedence == readBinOp.Precedence &&
-                                   readBinOp.Associativity == Associativity.Left) &&
-                               stackOp.Type != OpType.LeftParens && stackOp.Type != OpType.Coma)
+                               // the operator at the top of the operator stack is not a left parenthesis or coma
+                               stackOp.Type != OpType.LeftParens && stackOp.Type != OpType.Coma &&
+                               // there is an operator at the top of the operator stack with greater precedence
+                               (stackOp.Precedence > readBinOp.Precedence ||
+                                // or the operator at the top of the operator stack has equal precedence and the token is left associative
+                                stackOp.Precedence == readBinOp.Precedence &&
+                                readBinOp.Associativity == Associativity.Left))
                         {
                             opStack.Pop();
                             PopOpOpandsAndPushNode(stackOp);
@@ -405,35 +304,18 @@ namespace ShuntingYard
                         }
                         else // function call
                         {
-                            List<INode> args = new List<INode>();
                             r.ReadToken(); // skip (
-                            
-                            var arg = ParseUntil(r, opStack, output, Token.RightParens, opStack.Count);
+                            INode arg = ParseUntil(r, opStack, output, Token.RightParens, opStack.Count);
                             r.ReadToken(); // skip )
 
-                            void RecurseThroughArguments(INode n)
-                            {
-                                switch (n)
-                                {
-                                    case BinOp b when b.Type == OpType.Coma:
-                                        RecurseThroughArguments(b.A);
-                                        RecurseThroughArguments(b.B);
-                                        break;
-                                    default:
-                                        args.Add(n);
-                                        break;
-                                }
-                            }
-                            
-                            RecurseThroughArguments(arg);
+                            List<INode> args = new List<INode>();
+                            RecurseThroughArguments(args, arg);
                             output.Push(new FuncCall(id, args));
                             break;
                         }
                     default:
                         throw new ArgumentOutOfRangeException(r.CurrentTokenType.ToString());
                 }
-
-                Console.WriteLine(r.CurrentTokenType + " " + r.CurrentToken);
             } while (r.CurrentTokenType != readUntilToken);
 
             while (opStack.Count > startOpStackSize)
@@ -445,6 +327,124 @@ namespace ShuntingYard
             }
 
             return output.Pop();
+
+            void PopOpOpandsAndPushNode(Operator readBinOp)
+            {
+                var b = output.Pop();
+                if (readBinOp.Unary)
+                {
+                    output.Push(new UnOp(readBinOp.Type, b));
+                }
+                else
+                {
+                    var a = output.Pop();
+                    output.Push(new BinOp(readBinOp.Type, a, b));
+                }
+            }
+
+            void RecurseThroughArguments(List<INode> args, INode n)
+            {
+                switch (n)
+                {
+                    case BinOp b when b.Type == OpType.Coma:
+                        RecurseThroughArguments(args, b.A);
+                        RecurseThroughArguments(args, b.B);
+                        break;
+                    default:
+                        args.Add(n);
+                        break;
+                }
+            }
+        }
+    }
+
+    internal class Reader
+    {
+        private readonly string _input;
+        private int _i;
+
+        public Reader(string input)
+        {
+            _input = input.Trim();
+            _i = 0;
+        }
+
+        private void SkipWhitespace()
+        {
+            while (!Done && Char.IsWhiteSpace(_input[_i]))
+                _i++;
+        }
+
+        public bool Done => _i >= _input.Length;
+        private char NextChar => _input[_i];
+        private char ConsumeChar() => _input[_i++];
+
+        public string CurrentToken;
+        public Token CurrentTokenType;
+        public Token PrevTokenType;
+
+        public void ReadToken()
+        {
+            CurrentToken = null;
+            PrevTokenType = CurrentTokenType;
+            CurrentTokenType = Token.None;
+            if (Done)
+                return;
+            if (NextChar == '(')
+            {
+                ConsumeChar();
+                CurrentTokenType = Token.LeftParens;
+            }
+            else if (NextChar == ')')
+            {
+                ConsumeChar();
+                CurrentTokenType = Token.RightParens;
+            }
+            else if (Char.IsDigit(NextChar))
+            {
+                StringBuilder sb = new StringBuilder();
+                do
+                {
+                    sb.Append(ConsumeChar());
+                } while (!Done && Char.IsDigit(NextChar));
+
+                CurrentToken = sb.ToString();
+                CurrentTokenType = Token.Number;
+            }
+            else
+            {
+                if (MatchOp(out var op))
+                {
+                    CurrentToken = op.Str;
+                    CurrentTokenType = Token.Op;
+                    for (int i = 0; i < CurrentToken.Length; i++)
+                        ConsumeChar();
+                }
+                else
+                {
+                    CurrentTokenType = Token.Identifier;
+                    StringBuilder sb = new StringBuilder();
+                    while (!Done && !Char.IsDigit(NextChar) && !MatchOp(out _))
+                        sb.Append(ConsumeChar());
+                    CurrentToken = sb.ToString();
+                }
+            }
+
+            SkipWhitespace();
+
+            bool MatchOp(out Parser.Operator desc)
+            {
+                foreach (var pair in Parser.Ops)
+                {
+                    if (_input.IndexOf(pair.Value.Str, _i, StringComparison.Ordinal) != _i)
+                        continue;
+                    desc = pair.Value;
+                    return true;
+                }
+
+                desc = default;
+                return false;
+            }
         }
     }
 }

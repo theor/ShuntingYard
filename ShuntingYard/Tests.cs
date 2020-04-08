@@ -9,7 +9,7 @@ namespace ShuntingYard
         [Test]
         public void Test()
         {
-            Console.WriteLine(Parser.Format(new BinOp(OpType.Add,
+            Console.WriteLine(Formatter.Format(new BinOp(OpType.Add,
                 new BinOp(OpType.Mul, new Value(1), new Value(2)), new Value(3))));
         }
 
@@ -41,12 +41,13 @@ namespace ShuntingYard
         public void Parse(string input, string expectedFormat, float? result = null)
         {
             INode parsed = Parser.Parse(input);
-            var format = Parser.Format(parsed);
+            var format = Formatter.Format(parsed);
             Console.WriteLine(format);
             Assert.AreEqual(expectedFormat, format);
             if(result.HasValue)
                 Assert.AreEqual(result.Value, Evaluator.Eval(parsed, new Dictionary<string, float>{{"a", 7f}}));
         }
+        
         [TestCase("32+4", "32 + 4")]
         [TestCase("32+ 4", "32 + 4")]
         [TestCase("32+ 4*1", "32 + 4 * 1")]
@@ -57,7 +58,7 @@ namespace ShuntingYard
         [TestCase("1,2", "1 , 2")]
         public void Tokenizer_Works(string input, string spaceSeparatedTokens)
         {
-            var reader = new Parser.Reader(input);
+            var reader = new Reader(input);
             string result = null;
             while (!reader.Done)
             {
