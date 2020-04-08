@@ -45,6 +45,18 @@ namespace ShuntingYard
         }
     }
 
+    struct FuncCall : IOp
+    {
+        public string Id;
+        public List<IOp> Arguments;
+
+        public FuncCall(string id, List<IOp> arguments)
+        {
+            Id = id;
+            Arguments = arguments;
+        }
+    }
+
     struct Value : IVal
     {
         public float F;
@@ -67,6 +79,7 @@ namespace ShuntingYard
 
     public enum Token
     {
+        None,
         Op,
         Number,
         Identifier,
@@ -86,8 +99,10 @@ namespace ShuntingYard
                 case Variable v:
                     return "$" + v.Id.ToString();
                 case BinOp b:
-
                     return $"({Format(b.A)} {FormatOp(b.Type)} {Format(b.B)})";
+                case FuncCall f:
+                    var args = string.Join(", ", f.Arguments.Select(Format));
+                    return $"{f.Id}({args})";
                 default:
                     throw new NotImplementedException();
             }
@@ -156,6 +171,9 @@ namespace ShuntingYard
             public void ReadToken()
             {
                 CurrentToken = null;
+                CurrentTokenType = Token.None;
+                if(Done)
+                    return;
                 if (NextChar == '(')
                 {
                     ConsumeChar();
@@ -226,13 +244,14 @@ namespace ShuntingYard
             var opStack = new Stack<OpDesc>();
             
             Reader r = new Reader(s);
-            while (!r.Done)
+            r.ReadToken();
+            do
             {
-                r.ReadToken();
                 switch (r.CurrentTokenType)
                 {
                     case Token.LeftParens:
                         opStack.Push(Ops[BinOpType.LeftParens]);
+                        r.ReadToken();
                         break;
                     case Token.RightParens:
                     {
@@ -244,6 +263,7 @@ namespace ShuntingYard
 
                         if (opStack.TryPeek(out var leftParens) && leftParens.Type == BinOpType.LeftParens)
                             opStack.Pop();
+                        r.ReadToken();
                         break;
                     }
                     case Token.Op:
@@ -254,30 +274,45 @@ namespace ShuntingYard
                             or (there is an operator at the top of the operator stack with greater precedence)
                             or (the operator at the top of the operator stack has equal precedence and the token is left associative))
                             and (the operator at the top of the operator stack is not a left parenthesis):*/
-                        while (opStack.TryPeek(out var stackOp) && 
-                               (/* function ||*/
-                               stackOp.Precedence > readBinOp.Precedence ||
-                               stackOp.Precedence == readBinOp.Precedence && readBinOp.Associativity == Associativity.Left) &&
+                        while (opStack.TryPeek(out var stackOp) &&
+                               ( /* function ||*/
+                                   stackOp.Precedence > readBinOp.Precedence ||
+                                   stackOp.Precedence == readBinOp.Precedence &&
+                                   readBinOp.Associativity == Associativity.Left) &&
                                stackOp.Type != BinOpType.LeftParens)
                         {
                             opStack.Pop();
                             PopOpOpandsAndPushNode(stackOp);
                         }
+
                         opStack.Push(readBinOp);
+                        r.ReadToken();
                         break;
                     }
                     case Token.Number:
                         output.Push(new Value(float.Parse(r.CurrentToken)));
+                        r.ReadToken();
                         break;
                     case Token.Identifier:
-                        output.Push(new Variable(r.CurrentToken));
-                        break;
+                        var id = r.CurrentToken;
+                        r.ReadToken();
+                        if (r.CurrentTokenType != Token.LeftParens) // variable
+                        {
+                            output.Push(new Variable(id));
+                            break;
+                        }
+                        else // function call
+                        {
+                            throw new NotImplementedException();
+                            break;
+                        }
                     default:
                         throw new ArgumentOutOfRangeException(r.CurrentTokenType.ToString());
                 }
-                Console.WriteLine(r.CurrentTokenType + " " + r.CurrentToken);
-            }
 
+                Console.WriteLine(r.CurrentTokenType + " " + r.CurrentToken);
+            } while (r.CurrentTokenType != Token.None);
+            
             while (opStack.TryPop(out var readBinOp))
             {
                 PopOpOpandsAndPushNode(readBinOp);
