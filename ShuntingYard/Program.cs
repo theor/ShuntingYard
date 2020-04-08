@@ -28,7 +28,21 @@ namespace ShuntingYard
         Mul,
         Div,
         LeftParens,
-        RightParens
+        RightParens,
+        Plus,
+        Minus
+    }
+
+    struct UnOp : IOp
+    {
+        public BinOpType Type;
+        public INode A;
+
+        public UnOp(BinOpType type, INode a)
+        {
+            Type = type;
+            A = a;
+        }
     }
 
     struct BinOp : IOp
@@ -98,6 +112,8 @@ namespace ShuntingYard
                     return v.F.ToString();
                 case Variable v:
                     return "$" + v.Id.ToString();
+                case UnOp un:
+                    return $"{FormatOp(un.Type)}{Format(un.A)}";
                 case BinOp b:
                     return $"({Format(b.A)} {FormatOp(b.Type)} {Format(b.B)})";
                 case FuncCall f:
@@ -114,13 +130,15 @@ namespace ShuntingYard
             public readonly string Str;
             public readonly int Precedence;
             public readonly Associativity Associativity;
+            public bool Unary;
 
-            public OpDesc(BinOpType type, string str, int precedence, Associativity associativity = Associativity.None)
+            public OpDesc(BinOpType type, string str, int precedence, Associativity associativity = Associativity.None, bool unary = false)
             {
                 Type = type;
                 Str = str;
                 Precedence = precedence;
                 Associativity = associativity;
+                Unary = unary;
             }
         }
 
@@ -134,9 +152,14 @@ namespace ShuntingYard
         {
             {BinOpType.Add, new OpDesc(BinOpType.Add, "+", 2, Associativity.Left)},
             {BinOpType.Sub, new OpDesc(BinOpType.Sub, "-", 2, Associativity.Left)},
+            
             {BinOpType.Mul, new OpDesc(BinOpType.Mul, "*", 3, Associativity.Left)},
             {BinOpType.Div, new OpDesc(BinOpType.Div, "/", 3, Associativity.Left)},
-            {BinOpType.LeftParens, new OpDesc(BinOpType.LeftParens, "(", 4)},
+            
+            {BinOpType.Plus, new OpDesc(BinOpType.Plus, "+", 4, Associativity.Right, unary: true)},
+            {BinOpType.Minus, new OpDesc(BinOpType.Minus, "-", 4, Associativity.Right, unary: true)},
+            
+            {BinOpType.LeftParens, new OpDesc(BinOpType.LeftParens, "(", 5)},
         };
 
         private static string FormatOp(BinOpType bType)
@@ -167,10 +190,12 @@ namespace ShuntingYard
 
             public string CurrentToken;
             public Token CurrentTokenType;
+            public Token PrevTokenType;
 
             public void ReadToken()
             {
                 CurrentToken = null;
+                PrevTokenType = CurrentTokenType;
                 CurrentTokenType = Token.None;
                 if(Done)
                     return;
@@ -233,9 +258,9 @@ namespace ShuntingYard
             }
         }
 
-        static OpDesc ReadBinOp(string input)
+        static OpDesc ReadBinOp(string input, bool unary)
         {
-            return Ops.Single(o => o.Value.Str == input).Value;
+            return Ops.Single(o => o.Value.Str == input && o.Value.Unary == unary).Value;
         }
 
         public static INode Parse(string s)
@@ -268,7 +293,9 @@ namespace ShuntingYard
                     }
                     case Token.Op:
                     {
-                        var readBinOp = ReadBinOp(r.CurrentToken);
+                        bool unary = r.PrevTokenType == Token.Op || r.PrevTokenType == Token.LeftParens || r.PrevTokenType == Token.None;
+                            
+                        var readBinOp = ReadBinOp(r.CurrentToken, unary);
 
                         /*while ((there is a function at the top of the operator stack)
                             or (there is an operator at the top of the operator stack with greater precedence)
@@ -321,9 +348,17 @@ namespace ShuntingYard
 
             void PopOpOpandsAndPushNode(OpDesc readBinOp)
             {
-                var b = output.Pop();
-                var a = output.Pop();
-                output.Push(new BinOp(readBinOp.Type, a, b));
+                if (readBinOp.Unary)
+                {
+                    var a = output.Pop();
+                    output.Push(new UnOp(readBinOp.Type, a));
+                }
+                else
+                {
+                    var b = output.Pop();
+                    var a = output.Pop();
+                    output.Push(new BinOp(readBinOp.Type, a, b));
+                }
             }
         }
     }
@@ -346,6 +381,12 @@ namespace ShuntingYard
         [TestCase("(32+4)", "(32 + 4)")]
         [TestCase("a", "$a")]
         [TestCase("1 * a+3", "((1 * $a) + 3)")]
+        // unary
+        [TestCase("-1", "-1")]
+        [TestCase("--1", "--1")]
+        [TestCase("-3+4", "(-3 + 4)")]
+        [TestCase("3+-4", "(3 + -4)")]
+        [TestCase("-(3+4)", "-(3 + 4)")]
         public void Parse(string input, string expectedFormat)
         {
             INode parsed = Parser.Parse(input);
