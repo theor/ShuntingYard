@@ -55,6 +55,16 @@ namespace ShuntingYard
         }
     }
 
+    struct Variable : IVal
+    {
+        public string Id;
+
+        public Variable(string id)
+        {
+            Id = id;
+        }
+    }
+
     public enum Token
     {
         Op,
@@ -73,6 +83,8 @@ namespace ShuntingYard
             {
                 case Value v:
                     return v.F.ToString();
+                case Variable v:
+                    return "$" + v.Id.ToString();
                 case BinOp b:
 
                     return $"({Format(b.A)} {FormatOp(b.Type)} {Format(b.B)})";
@@ -258,6 +270,7 @@ namespace ShuntingYard
                         output.Push(new Value(float.Parse(r.CurrentToken)));
                         break;
                     case Token.Identifier:
+                        output.Push(new Variable(r.CurrentToken));
                         break;
                     default:
                         throw new ArgumentOutOfRangeException(r.CurrentTokenType.ToString());
@@ -296,6 +309,8 @@ namespace ShuntingYard
         [TestCase("12+34*45", "(12 + (34 * 45))")]
         [TestCase("12+34+45", "((12 + 34) + 45)", Description = "Left associativity")]
         [TestCase("(32+4)", "(32 + 4)")]
+        [TestCase("a", "$a")]
+        [TestCase("1 * a+3", "((1 * $a) + 3)")]
         public void Parse(string input, string expectedFormat)
         {
             INode parsed = Parser.Parse(input);
