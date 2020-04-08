@@ -30,7 +30,8 @@ namespace ShuntingYard
         LeftParens,
         RightParens,
         Plus,
-        Minus
+        Minus,
+        Coma
     }
 
     struct UnOp : IOp
@@ -160,6 +161,7 @@ namespace ShuntingYard
             {BinOpType.Minus, new OpDesc(BinOpType.Minus, "-", 4, Associativity.Right, unary: true)},
             
             {BinOpType.LeftParens, new OpDesc(BinOpType.LeftParens, "(", 5)},
+            {BinOpType.Coma, new OpDesc(BinOpType.Coma, ",", 1000)},
         };
 
         private static string FormatOp(BinOpType bType)
@@ -270,6 +272,29 @@ namespace ShuntingYard
             
             Reader r = new Reader(s);
             r.ReadToken();
+            var readUntilToken = Token.None;
+            int startOpStackSize = 0;
+            
+            return ParseUntil(r, opStack, output, readUntilToken, startOpStackSize);
+        }
+
+        private static INode ParseUntil(Reader r, Stack<OpDesc> opStack, Stack<INode> output, Token readUntilToken, int startOpStackSize)
+        {
+            void PopOpOpandsAndPushNode(OpDesc readBinOp)
+            {
+                if (readBinOp.Unary)
+                {
+                    var a = output.Pop();
+                    output.Push(new UnOp(readBinOp.Type, a));
+                }
+                else
+                {
+                    var b = output.Pop();
+                    var a = output.Pop();
+                    output.Push(new BinOp(readBinOp.Type, a, b));
+                }
+            }
+
             do
             {
                 switch (r.CurrentTokenType)
@@ -293,14 +318,15 @@ namespace ShuntingYard
                     }
                     case Token.Op:
                     {
-                        bool unary = r.PrevTokenType == Token.Op || r.PrevTokenType == Token.LeftParens || r.PrevTokenType == Token.None;
-                            
+                        bool unary = r.PrevTokenType == Token.Op || r.PrevTokenType == Token.LeftParens ||
+                                     r.PrevTokenType == Token.None;
+
                         var readBinOp = ReadBinOp(r.CurrentToken, unary);
 
                         /*while ((there is a function at the top of the operator stack)
-                            or (there is an operator at the top of the operator stack with greater precedence)
-                            or (the operator at the top of the operator stack has equal precedence and the token is left associative))
-                            and (the operator at the top of the operator stack is not a left parenthesis):*/
+                        or (there is an operator at the top of the operator stack with greater precedence)
+                        or (the operator at the top of the operator stack has equal precedence and the token is left associative))
+                        and (the operator at the top of the operator stack is not a left parenthesis):*/
                         while (opStack.TryPeek(out var stackOp) &&
                                ( /* function ||*/
                                    stackOp.Precedence > readBinOp.Precedence ||
@@ -338,28 +364,17 @@ namespace ShuntingYard
                 }
 
                 Console.WriteLine(r.CurrentTokenType + " " + r.CurrentToken);
-            } while (r.CurrentTokenType != Token.None);
-            
-            while (opStack.TryPop(out var readBinOp))
+            } while (r.CurrentTokenType != readUntilToken);
+
+            while (opStack.Count > startOpStackSize)
             {
+                var readBinOp = opStack.Pop();
+                if (readBinOp.Type == BinOpType.LeftParens || readBinOp.Type == BinOpType.RightParens)
+                    throw new InvalidDataException("Mismatched parens");
                 PopOpOpandsAndPushNode(readBinOp);
             }
-            return output.Single();
 
-            void PopOpOpandsAndPushNode(OpDesc readBinOp)
-            {
-                if (readBinOp.Unary)
-                {
-                    var a = output.Pop();
-                    output.Push(new UnOp(readBinOp.Type, a));
-                }
-                else
-                {
-                    var b = output.Pop();
-                    var a = output.Pop();
-                    output.Push(new BinOp(readBinOp.Type, a, b));
-                }
-            }
+            return output.Single();
         }
     }
 
@@ -401,6 +416,7 @@ namespace ShuntingYard
         [TestCase("1*a", "1 * a")]
         [TestCase("(32+4)", "( 32 + 4 )")]
         [TestCase("(32+4)*1", "( 32 + 4 ) * 1")]
+        [TestCase("1,2", "1 , 2")]
         public void Tokenizer_Works(string input, string spaceSeparatedTokens)
         {
             var reader = new Parser.Reader(input);
