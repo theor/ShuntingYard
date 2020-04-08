@@ -63,9 +63,9 @@ namespace ShuntingYard
     struct FuncCall : IOp
     {
         public string Id;
-        public List<IOp> Arguments;
+        public List<INode> Arguments;
 
-        public FuncCall(string id, List<IOp> arguments)
+        public FuncCall(string id, List<INode> arguments)
         {
             Id = id;
             Arguments = arguments;
@@ -157,8 +157,8 @@ namespace ShuntingYard
             {BinOpType.Mul, new OpDesc(BinOpType.Mul, "*", 3, Associativity.Left)},
             {BinOpType.Div, new OpDesc(BinOpType.Div, "/", 3, Associativity.Left)},
             
-            {BinOpType.Plus, new OpDesc(BinOpType.Plus, "+", 4, Associativity.Right, unary: true)},
-            {BinOpType.Minus, new OpDesc(BinOpType.Minus, "-", 4, Associativity.Right, unary: true)},
+            {BinOpType.Plus, new OpDesc(BinOpType.Plus, "+", 2000, Associativity.Right, unary: true)},
+            {BinOpType.Minus, new OpDesc(BinOpType.Minus, "-", 2000, Associativity.Right, unary: true)},
             
             {BinOpType.LeftParens, new OpDesc(BinOpType.LeftParens, "(", 5)},
             {BinOpType.Coma, new OpDesc(BinOpType.Coma, ",", 1000)},
@@ -332,7 +332,7 @@ namespace ShuntingYard
                                    stackOp.Precedence > readBinOp.Precedence ||
                                    stackOp.Precedence == readBinOp.Precedence &&
                                    readBinOp.Associativity == Associativity.Left) &&
-                               stackOp.Type != BinOpType.LeftParens)
+                               stackOp.Type != BinOpType.LeftParens && stackOp.Type != BinOpType.Coma)
                         {
                             opStack.Pop();
                             PopOpOpandsAndPushNode(stackOp);
@@ -356,7 +356,28 @@ namespace ShuntingYard
                         }
                         else // function call
                         {
-                            throw new NotImplementedException();
+                            List<INode> args = new List<INode>();
+                            r.ReadToken(); // skip (
+                            
+                            var arg = ParseUntil(r, opStack, output, Token.RightParens, opStack.Count);
+                            r.ReadToken(); // skip )
+
+                            void RecurseThroughArguments(INode n)
+                            {
+                                switch (n)
+                                {
+                                    case BinOp b when b.Type == BinOpType.Coma:
+                                        RecurseThroughArguments(b.A);
+                                        RecurseThroughArguments(b.B);
+                                        break;
+                                    default:
+                                        args.Add(n);
+                                        break;
+                                }
+                            }
+                            
+                            RecurseThroughArguments(arg);
+                            output.Push(new FuncCall(id, args));
                             break;
                         }
                     default:
@@ -374,7 +395,7 @@ namespace ShuntingYard
                 PopOpOpandsAndPushNode(readBinOp);
             }
 
-            return output.Single();
+            return output.Pop();
         }
     }
 
@@ -402,6 +423,17 @@ namespace ShuntingYard
         [TestCase("-3+4", "(-3 + 4)")]
         [TestCase("3+-4", "(3 + -4)")]
         [TestCase("-(3+4)", "-(3 + 4)")]
+        // coma
+        [TestCase("1,2", "(1 , 2)")]
+        [TestCase("1,2,3", "(1 , (2 , 3))")]
+        // func calls
+        [TestCase("sin(42)", "sin(42)")]
+        [TestCase("sin(42, 43)", "sin(42, 43)")]
+        [TestCase("sin(-42)", "sin(-42)")]
+        [TestCase("sin(1+2)", "sin((1 + 2))")]
+        [TestCase("sin(cos(43))", "sin(cos(43))")]
+        [TestCase("sin(1, cos(43))", "sin(1, cos(43))")]
+        [TestCase("sin(-42, cos(-43))", "sin(-42, cos(-43))")]
         public void Parse(string input, string expectedFormat)
         {
             INode parsed = Parser.Parse(input);
